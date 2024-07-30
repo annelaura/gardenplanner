@@ -2,4 +2,5 @@ streamlit
 ephem
 selenium
 webdriver_manager
+plotly
 #pytz
