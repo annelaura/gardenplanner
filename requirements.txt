@@ -1,5 +1,5 @@
 streamlit
 ephem
 selenium
-webdriver
-pytz
+#webdriver
+#pytz
