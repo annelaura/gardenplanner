@@ -1,0 +1,7 @@
+tp_start,garden_start,harvest_start,harvest_end,crop,bedprep_start,bedprep_end,Afgrøde,seeding_type,placement_type,placement_block,FAMILY,multiple,bed_size,succession,crop_no,bed,bed_location,bed_succession
+Sætte_uden_forspiring,2023-10-01,2024-06-18,2024-06-25,Hvidløg,2024-06-26,2024-07-03,Hvidløg,Sætte,Friland,Friland1,Alliums,,1,1,Hvidløg_1,10,A,1
+DS,2023-04-01,2023-07-05,2023-07-26,Gulerødder,2023-07-27,2023-08-03,Gulerødder,DS,Friland,"Friland1, Forhave",Apiaceae,,1,1,Gulerødder_1,11,A,1
+DS,2023-04-01,2023-07-05,2023-07-26,Gulerødder,2023-07-27,2023-08-03,Gulerødder,DS,Friland,"Friland1, Forhave",Apiaceae,,1,1,Gulerødder_1,12,A,1
+DS,2023-04-01,2023-07-05,2023-07-26,Gulerødder,2023-07-27,2023-08-03,Gulerødder,DS,Friland,"Friland1, Forhave",Apiaceae,,1,1,Gulerødder_1,17,A,1
+2019-03-01 00:00:00,2023-04-15,2023-05-18,2023-11-04,Bladkål PALME_PP,2023-11-05,2023-11-12,Bladkål PALME_PP,TP,Friland,Friland2,Brassica,,1,1,Bladkål PALME_PP_1,13,A,1
+2019-03-01 00:00:00,2023-04-15,2023-05-03,2023-09-25,Broccoli_PP,2023-09-26,2023-10-03,Broccoli_PP,TP,Friland,Friland2,Brassica,,1,1,Broccoli_PP_1,14,A,1
