@@ -15,6 +15,7 @@ import time
 import pytz
 import plotly.express as px
 from plotly.subplots import make_subplots
+import math
 
 # set constants
 lat = 55.41989879338981
@@ -237,32 +238,23 @@ def calc_start_end(row, year): # OBS DTM should be calculated by date and not by
 
     return(succession_df)
 
-def read_crop_info(uploaded_file):
-    """
-    Reads a crop profile file based on the specified separator.
-
-    Parameters:
-        separator (str): The separator used in the file. Defaults to the type of the uploaded file.
-
-    Returns:
-        pandas.DataFrame: The crop profile data read from the file.
-    """
-    crop_info = None
-    separator=uploaded_file.type
-    if separator == "text/csv":
-        crop_info = pd.read_csv(uploaded_file)
-    elif separator == "text/tab-separated-values":
-        crop_info = pd.read_csv(uploaded_file, sep="\t")
-    elif separator == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-        crop_info = pd.read_excel(uploaded_file)
+def read_crop_info(file, file_type):
+    if file_type == "csv":
+        crop_info = pd.read_csv(file)
+    elif file_type == "xlsx":
+        crop_info = pd.read_excel(file)
+    elif file_type == "tsv":
+        crop_info = pd.read_csv(file, delimiter='\t')
     else:
-        print("File type not supported")
+        crop_info = None
+        raise ValueError("Unsupported file type")
     # format columns
-    if 'DTM_max' in crop_info.columns.tolist():
-        crop_info.loc[crop_info.DTM_max.isnull(),'DTM_max']=crop_info.loc[crop_info.DTM_max.isnull()].DTM.tolist()
-    if 'DAYS AFTER MATURITY' in crop_info.columns.tolist():
-        crop_info['DAYS AFTER MATURITY'] = crop_info['DAYS AFTER MATURITY'].fillna(0)
-        crop_info['DAYS AFTER MATURITY'] = pd.to_timedelta(crop_info['DAYS AFTER MATURITY'], unit='D')
+    if crop_info is not None:
+        if 'DTM_max' in crop_info.columns.tolist():
+            crop_info.loc[crop_info.DTM_max.isnull(),'DTM_max']=crop_info.loc[crop_info.DTM_max.isnull()].DTM.tolist()
+        if 'DAYS AFTER MATURITY' in crop_info.columns.tolist():
+            crop_info['DAYS AFTER MATURITY'] = crop_info['DAYS AFTER MATURITY'].fillna(0)
+            crop_info['DAYS AFTER MATURITY'] = pd.to_timedelta(crop_info['DAYS AFTER MATURITY'], unit='D')
 
     return crop_info
 
@@ -692,3 +684,95 @@ def plot_plan(plan_df):
     # #fig.add_trace(figures[5]['data'][0], row=3, col=2)
 
     return figures
+
+def get_calendar_and_seed_order(plan_df, crop_df, crop_info): # obs this calculates seed order for 2024
+    date_cols = ['garden_start', 'harvest_start', 'harvest_end','bedprep_start', 'bedprep_end']
+    for col in date_cols:
+        plan_df[col] = pd.to_datetime(plan_df[col])
+    index_cols = ['crop', 'Afgrøde','crop_no','seeding_type','FAMILY', 'bed_size', 'bed', 'bed_location', 'bed_succession', 'block', 'harvest_end']
+    date_cols = ['tp_start', 'garden_start', 'harvest_start', 'bedprep_start']
+    overview = pd.merge(plan_df, crop_df.drop(['succession'], axis = 1), how = 'outer')
+    overview_long = overview[index_cols+date_cols].melt(id_vars=index_cols)
+    print(overview_long.shape)
+    overview_long = overview_long.loc[overview_long['value'].isin(['DS','Sætte_uden_forspiring',1])==False] # removes the "tp_start" rows for DS and sætte
+    overview_long = overview_long.loc[overview_long['value'].notnull()]
+    overview_long['value'] = pd.to_datetime(overview_long['value'])
+    # compute harvest period
+    harvest_dfs = []
+    for i, row in overview_long.loc[overview_long.variable == 'harvest_start'].iterrows():
+        harvest_df = pd.DataFrame({'value' :pd.date_range(row.value, row.harvest_end, freq='W'),'crop_no': row.crop_no})
+        harvest_df['percentage_harvestperiod']=np.round((((harvest_df.index + 1)/harvest_df.shape[0])*100),2)
+        harvest_dfs.append(harvest_df)
+        harvest_df['variable']='harvest_start'
+    harvest_explode = pd.concat(harvest_dfs)
+    harvest_explode = pd.merge(harvest_explode, overview_long.drop('value', axis = 1), on = ['variable','crop_no'], how = 'left')
+    # add to overview
+    overview_long = pd.concat([overview_long, harvest_explode])
+    # add year and week
+    overview_long['year']=overview_long['value'].dt.strftime('%Y').astype(int)
+    overview_long['week']= overview_long['value'].dt.isocalendar().week
+    overview_long['weekday'] = overview_long['value'].dt.strftime('%a')
+    overview_long['date'] = pd.to_datetime(overview_long['value']).dt.strftime('%d/%m/%Y')
+    overview_long.replace('harvest_start','harvest', inplace = True)
+
+    # edit crop_info
+    crop_info.loc[crop_info.seeds_pr_cell.isnull(), 'seeds_pr_cell']=1
+    crop_info['seeds'] = (25/(crop_info.SPACING/100))*crop_info.ROWS*crop_info.bed_size*crop_info.seeds_pr_cell
+    # calculate trays
+    crop_df = pd.merge(overview.loc[overview.garden_start>=pd.to_datetime('2024-01-01')], crop_info[['Afgrøde','PP','cells_pr_tray','seeds_pr_cell','seeds']], on = 'Afgrøde').fillna(1)
+    crop_df['seeds_20']=crop_df.seeds*1.2
+    crop_df['trays']=(crop_df.seeds_20/crop_df.cells_pr_tray/crop_df.seeds_pr_cell)
+    crop_df['trays_full'] = [math.ceil(x) for x in crop_df.trays]
+    tray_order = pd.DataFrame(crop_df.groupby(['PP','seeding_type'])['trays_full'].sum()).reset_index()
+    # for transplants/PP calculate seeds, so trays are full --> unhash below if you want to do that 
+    # crop_df.loc[crop_df.seeding_type.isin(['TP','PP']),'seeds_20']=(crop_df.loc[crop_df.seeding_type.isin(['TP','PP'])].seeds_20/crop_df.loc[crop_df.seeding_type.isin(['TP','PP'])].trays)*crop_df.loc[crop_df.seeding_type.isin(['TP','PP'])].trays_full
+    #calculate seed order
+    seed_order = pd.DataFrame(crop_df.groupby(['Afgrøde'])['seeds_20'].sum()).reset_index()
+    seed_info = crop_df.groupby(['Afgrøde','seeding_type','cells_pr_tray','seeds_pr_cell','bed_size']).size().reset_index()
+    seed_info = seed_info.rename(columns={0:'successions'})
+    seed_info['no_trays']=crop_df.groupby(['Afgrøde','seeding_type','cells_pr_tray','seeds_pr_cell','bed_size']).trays_full.sum().tolist()
+    seed_order = pd.merge(seed_order,seed_info)
+    seed_order.loc[seed_order.seeding_type.isin(['TP','PP'])==False,'cells_pr_tray'] = np.nan
+    seed_order.loc[seed_order.seeding_type.isin(['TP','PP'])==False,'seeds_pr_cell'] = np.nan
+    seed_order.loc[seed_order.seeding_type.isin(['TP','PP'])==False,'no_trays'] = np.nan
+    seed_order['trays_pr_succession']=seed_order.no_trays/seed_order.successions
+    # finish calendar
+    calendar = overview_long[['variable','crop','crop_no','week','date','block','bed','bed_size','bed_location', 'percentage_harvestperiod', 'harvest_end']]
+    calendar = pd.merge(calendar, crop_df[['crop_no','seeding_type','PP', 'cells_pr_tray', 'seeds_pr_cell','seeds','seeds_20', 'trays', 'trays_full']])
+    calendar = pd.merge(calendar, crop_info.rename(columns={'Afgrøde':'crop'})[['crop','ROWS','SPACING']])
+    for col in ['seeds','seeds_20','trays_full','ROWS','SPACING']:
+        calendar[col]=calendar[col].astype(int)
+    calendar['trays']=np.round(calendar.trays,2)
+    calendar.loc[calendar.seeding_type.isin(['TP','PP'])==False,'trays']=np.nan
+    calendar.loc[calendar.seeding_type.isin(['TP','PP'])==False,'trays_full']=np.nan
+    calendar = pd.merge(overview_long[['variable','crop','crop_no','date']],calendar, on = ['variable','crop','crop_no','date'])
+
+    return calendar, seed_order
+
+def progress_bar_html(percentage):
+    """Generates HTML for a battery-style progress bar."""
+    return f"""
+    <div style="
+        width: 100px; 
+        height: 20px; 
+        border: 2px solid #ccc; 
+        border-radius: 5px; 
+        position: relative; 
+        background-color: #f3f3f3;
+        ">
+        <div style="
+            width: {percentage}%;
+            height: 100%;
+            background-color: #4caf50;
+            border-radius: 5px 0 0 5px;
+            text-align: center;
+            color: white;
+            line-height: 20px;
+            position: absolute;
+            top: 0;
+            left: 0;
+            ">
+            {percentage}%
+        </div>
+    </div>
+    """
